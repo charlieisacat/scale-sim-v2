@@ -1,7 +1,7 @@
 import math
 import numpy as np
 
-from scalesim.memory.read_port import read_port
+from memory.read_port import read_port
 
 
 class ReadBufferEstimateBw:
@@ -92,6 +92,7 @@ class ReadBufferEstimateBw:
     def service_reads(self, incoming_requests_arr_np, incoming_cycles_arr):
         assert self.params_set_flag, 'Parameters are not set yet'
         assert incoming_cycles_arr.shape[0] == incoming_requests_arr_np.shape[0], 'Incoming cycles and requests dont match'
+        # print('service_reads === ',incoming_cycles_arr.shape, incoming_requests_arr_np.shape)
 
         outcycles = incoming_cycles_arr + self.hit_latency  # In estimate mode, operation is stall free.
         # Therefore its always a hit
@@ -101,6 +102,7 @@ class ReadBufferEstimateBw:
             cycle = int(incoming_cycles_arr[i][0])
 
             requests_this_cycle = incoming_requests_arr_np[i]
+            #记录是否为第一个请求，并记录该请求的时间
             if not self.first_request_seen:
                 if max(requests_this_cycle) > -1:
                     self.first_request_rcvd_cycle = cycle
@@ -108,6 +110,7 @@ class ReadBufferEstimateBw:
 
             for addr in requests_this_cycle:
                 if not addr == -1:
+                    # 计算prefetch数据的response cycle和相应的地址
                     self.manage_prefetches(cycle, addr)
 
         return outcycles
@@ -129,11 +132,15 @@ class ReadBufferEstimateBw:
                 self.elems_current_set = 0
                 self.current_set_id += 1
 
+                #这个set已经超过了active buffer中set的数量，所以需要预取
                 if self.current_set_id == self.read_buffer_set_end_id + 1:  # This should be prefetched
                     if not self.active_buffer_prefetch_done:
                         self.prefetch_bandwidth = self.default_bandwidth
+                        # prefetch要在第一个请求到达之前完成，所以要-1个cycle
+                        # 这里减去下一级内存的访存延迟,下面计算start时就不用减了
+                        # 同时last_prefetch_end_cycle去除了latency的影响, 因为计算带宽要去掉访存延迟的影响
                         self.last_prefetch_end_cycle = self.first_request_rcvd_cycle - 1 - self.backing_buffer.get_latency()
-
+                        # 一共需要预取多少个元素 / 带宽
                         cycles_needed = (self.num_sets_prefetch_buffer * self.num_items_per_set) \
                                         / self.prefetch_bandwidth
                         cycles_needed = math.ceil(cycles_needed)
@@ -155,6 +162,7 @@ class ReadBufferEstimateBw:
                         self.prefetch_buffer_set_end_id += self.num_sets_prefetch_buffer
                     
                     #Solving memory leak by discarding sets that are no longer in use
+                    # 把上一个set清空 
                     i = self.read_buffer_set_start_id
                     for j in range(self.num_sets_prefetch_buffer):
                         self.list_of_sets[i+j] = None
@@ -181,7 +189,8 @@ class ReadBufferEstimateBw:
 
         return False
 
-    #
+    # manage_prefetches只对set个数超过了active buffer中set数量时进行预取
+    # 这里对添加到current_set，但是set个数没有超过的addr进行预取
     def complete_all_prefetches(self):
         assert self.params_set_flag, 'Parameters are not set yet'
 
@@ -251,7 +260,11 @@ class ReadBufferEstimateBw:
                                                                 incoming_requests_arr_np=prefetch_requests)
 
         # Create / add elements to the trace matrix
+        # (cycles_needed, 1), (cycles_needed, prefetch_bw)
+        # response_cycle_arr是backing_buffer取回数据的时间，prefetch_requests是对应的地址 
         this_prefetch_traces = np.concatenate((response_cycles_arr, prefetch_requests), axis=1)
+        print('prefetch shape =',response_cycles_arr.shape, prefetch_requests.shape, \
+            this_prefetch_traces.shape, this_prefetch_traces[0, :])
 
         if not self.trace_valid:
             self.trace_matrix = this_prefetch_traces
@@ -259,15 +272,17 @@ class ReadBufferEstimateBw:
 
         else:
             del_cols = self.trace_matrix.shape[1] - this_prefetch_traces.shape[1]
-            if del_cols > 0:
+            shape1 = self.trace_matrix.shape
+            if del_cols > 0: # trace_matrix的列数>this_pref_traces的列数, 说明地址少了
                 empty_cols = np.ones((this_prefetch_traces.shape[0], del_cols))
                 this_prefetch_traces = np.concatenate((this_prefetch_traces, empty_cols), axis=1)
 
-            elif del_cols < 0:
+            elif del_cols < 0: # trace < this_preftch的列
                 del_cols = int(-1 * del_cols)
                 empty_cols = np.ones((self.trace_matrix.shape[0], del_cols))
                 self.trace_matrix = np.concatenate((self.trace_matrix, empty_cols), axis=1)
 
+            # trace_matrix存储了response_cycle和对应的地址
             self.trace_matrix = np.concatenate((self.trace_matrix, this_prefetch_traces), axis=0)
 
     #

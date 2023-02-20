@@ -2,7 +2,7 @@ import math
 import time
 import numpy as np
 from tqdm import tqdm
-from scalesim.scale_config import scale_config as cfg
+from scale_config import scale_config as cfg
 
 
 class systolic_compute_os:
@@ -66,12 +66,18 @@ class systolic_compute_os:
         assert ifmap_col == filter_row, "Dimension mismatch between operands"
         self.ifmap_op_mat_trans = np.transpose(self.ifmap_op_mat)
 
+        # 这里已经变成矩阵乘的形式了
+        # T = kernel_w*kernel_h*channel
         self.Sr = self.ifmap_op_mat.shape[0]
         self.Sc = self.filter_op_mat.shape[1]
         self.T = self.ifmap_op_mat.shape[1]
+        print('self.Sr=%d'%self.Sr, 'self.Sr=%d'%self.Sr, 'self.T=%d'%self.T)
+        print('self.ifmap_op_mat.shape=',self.ifmap_op_mat.shape)
+        print('self.filter_op_mat.shape=',self.ifmap_op_mat.shape)
 
         self.arr_row, self.arr_col = self.config.get_array_dims()
 
+        # ifmap横着切开， filter竖着切开
         self.row_fold = math.ceil(self.Sr / self.arr_row)
         self.col_fold = math.ceil(self.Sc / self.arr_col)
 
@@ -93,7 +99,7 @@ class systolic_compute_os:
         for fr in range(self.row_fold):
             start_row_idx = fr * self.arr_row
             end_row_idx = min(start_row_idx + self.arr_row, self.Sr)
-
+            # array没有用满
             delta = self.arr_row - (end_row_idx - start_row_idx)
 
             # The usage of row idx in cols is correct as this is the transposed matrix
@@ -106,6 +112,7 @@ class systolic_compute_os:
                 null_req_mat = np.ones((self.T, delta)) * -1
                 this_fold_prefetch = np.concatenate((this_fold_prefetch, null_req_mat), axis=1)
 
+            #把所有flod对应的prefetch concat在一起
             if fr == 0:
                 self.ifmap_prefetch_matrix = this_fold_prefetch
             else:
@@ -115,8 +122,9 @@ class systolic_compute_os:
         # Roll out the matrices along the diagonal to account for temporal locality when there is a skew in demand
         #print('DEBUG: create_ifmap_prefetch_mat()')
         #start_time = time.time()
-
+        #按斜对角线展开：(0,0), (1,0), (0,1), (2,0), (1,1), (0,2)
         M, N = self.ifmap_prefetch_matrix.shape
+        print('self.ifmap_prefetch_matrix.shape=',self.ifmap_prefetch_matrix.shape)
         num_elems = M * N 
         num_diags = M + N
         prefetches = np.zeros((1,num_elems))
@@ -127,7 +135,7 @@ class systolic_compute_os:
 
         for diag_id in range(num_diags):
             max_row_id = min(diag_id, M - 1)
-            min_row_id = max(0, diag_id - N + 1)
+            min_row_id = max(0, diag_id - N + 1) #M-(M+N-1-diag_id)
             valid_rows = max_row_id - min_row_id + 1
 
             for offset in range(valid_rows):
@@ -135,6 +143,7 @@ class systolic_compute_os:
                 col_id = diag_id - row_id
 
                 elem = self.ifmap_prefetch_matrix[row_id][col_id]
+                # print('row_id=%d'%row_id, 'col_id=%d'%col_id)
                 prefetches[0, idx] = elem
                 idx += 1
                 pbar.update(1)
@@ -247,7 +256,10 @@ class systolic_compute_os:
                 # In this computation scheme we are allowing the generated outputs to drain out before
                 # starting the next fold
                 # This portion accounts for that extra time by adding null requests
+                print('before this_fold_demand.shape=', this_fold_demand.shape)
+                # prefetch没有这个concat 
                 this_fold_demand = np.concatenate((this_fold_demand, inter_fold_gap_suffix_mat), axis=0)
+                print('after this_fold_demand.shape=', this_fold_demand.shape)
 
                 # Add skew to the IFMAP demand matrix to reflect systolic pipeline fill
                 this_fold_demand = skew_matrix(this_fold_demand)
@@ -263,6 +275,7 @@ class systolic_compute_os:
         # TODO: cleanup
         # Add skew to the IFMAP demand matrix to reflect systolic pipeline fill
         #self.ifmap_demand_matrix = skew_matrix(self.ifmap_demand_matrix)
+        print('ifmap_demand_matrix shape===', self.ifmap_demand_matrix.shape)
 
     #
     def create_filter_demand_mat(self):
@@ -308,6 +321,7 @@ class systolic_compute_os:
         # TODO: Cleanup
         # Add skew to the Filter demand matrix to reflect systolic pipeline fill
         #self.filter_demand_matrix = skew_matrix(self.filter_demand_matrix)
+        print('filter_demand_matrix shape===', self.filter_demand_matrix.shape)
 
     #
     def create_ofmap_demand_mat(self):
@@ -315,11 +329,14 @@ class systolic_compute_os:
 
         inter_fold_gap_prefix = self.T  - 1
         inter_fold_gap_prefix_mat = np.ones((inter_fold_gap_prefix, self.arr_col)) * -1
+        print('ofmap_op_mat==', self.ofmap_op_mat, self.ofmap_op_mat.shape)
 
         # Debug messages
         #print('DEBUG: create_ifmap_demand_mat()')
         pbar = tqdm(total=self.col_fold * self.row_fold, disable=True)
 
+        #ofmap也是平行四边形的原因在于：
+        # 以左上角元素为例，计算得到output px需要T个cycle，那么第T+1个时刻计算完成后即可向下传递
         for fc in range(self.col_fold):
             for fr in range(self.row_fold):
                 row_start_id = fr * self.arr_row
@@ -330,7 +347,8 @@ class systolic_compute_os:
                 col_end_idx = min(col_start_id + self.arr_col, self.Sc)
                 col_delta = self.arr_col - (col_end_idx - col_start_id)
 
-                this_fold_demand = self.ofmap_op_mat[row_start_id: row_end_idx, col_start_id: col_end_idx]
+                #矩阵乘的结果
+                this_fold_demand = self.ofmap_op_mat[row_start_id: row_end_idx, col_start_id: col_end_idx] 
                 self.ofmap_writes += this_fold_demand.shape[0] * this_fold_demand.shape[1]
 
                 # Adding null requests when there is under utilization ie. no mapping along a few rows or cols
@@ -341,17 +359,21 @@ class systolic_compute_os:
                 if row_delta > 0:
                     null_req_mat = np.ones((row_delta, self.arr_col)) * -1
                     this_fold_demand = np.concatenate((this_fold_demand, null_req_mat), axis=0)
+                # print('1111>', this_fold_demand)
 
                 # Reflect along the rows
                 # This is a characteristic of the fact that the outputs are streamed out from the bottom edge
                 # If the outputs are streamed out from the top edge instead, then this step is not needed
-                this_fold_demand = np.flip(this_fold_demand, 0)
+                this_fold_demand = np.flip(this_fold_demand, 0) #上下翻转
                 self.ofmap_writes += this_fold_demand.shape[0] + this_fold_demand.shape[1]
+                # print('2222>', this_fold_demand)
 
                 # Now add the prefix matrix
                 # These are the null demands to account for when the operands are streamed in
                 # and the OFMAPS are not ready
+                # 在output矩阵前面concat
                 this_fold_demand = np.concatenate((inter_fold_gap_prefix_mat, this_fold_demand), axis=0)
+                # print('3333>', this_fold_demand)
 
                 # Calculate the mapping efficiency
                 row_used = min(self.arr_row, row_end_idx - row_start_id)
@@ -368,6 +390,8 @@ class systolic_compute_os:
 
                 # Add skew to the OFMAP demand matrix to reflect systolic pipeline fill
                 this_fold_demand = skew_matrix(this_fold_demand)
+                # print('4444>', this_fold_demand)
+                # print('ofmap this_fold_demand ====', this_fold_demand.shape, self.T)
 
                 if fr == 0 and fc == 0:
                     self.ofmap_demand_matrix = this_fold_demand
@@ -380,6 +404,7 @@ class systolic_compute_os:
         # TODO: cleanup
         # Add skew to the OFMAP demand matrix to reflect systolic pipeline fill
         #self.ofmap_demand_matrix = skew_matrix(self.ofmap_demand_matrix)
+        print('ofmap_demand_matrix shape===', self.ofmap_demand_matrix.shape)
 
     #
     def get_ifmap_prefetch_mat(self):
@@ -475,9 +500,11 @@ def skew_matrix(input_matrix_np):
     out_matrix_np = np.zeros((1,1))
     for c in range(cols):
         if c == 0:
+            #得到第0列的数据，然后下面padding cols-1个-1
             down_padding = -1 * np.ones((cols-1, 1))
             mat_col = input_matrix_np[:,c].reshape((rows,1))
             out_matrix_np = np.concatenate((mat_col, down_padding), axis=0)
+            print('mat_col.shape=',mat_col.shape, 'down_padding.shape=',down_padding.shape, out_matrix_np.shape, input_matrix_np[:,c].shape, input_matrix_np.shape)
 
         else:
             if c == cols -1:

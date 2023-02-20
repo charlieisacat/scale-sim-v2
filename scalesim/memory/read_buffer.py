@@ -4,7 +4,7 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-from scalesim.memory.read_port import read_port
+from memory.read_port import read_port
 
 
 class read_buffer:
@@ -115,7 +115,7 @@ class read_buffer:
         # In 'user' mode, this will be set in the set_params
 
         num_elems = fetch_matrix_np.shape[0] * fetch_matrix_np.shape[1]
-        num_lines = int(math.ceil(num_elems / self.req_gen_bandwidth))
+        num_lines = int(math.ceil(num_elems / self.req_gen_bandwidth)) #word per cycle
         self.fetch_matrix = np.ones((num_lines, self.req_gen_bandwidth)) * -1
 
         # Put stuff into the fetch matrix
@@ -131,11 +131,15 @@ class read_buffer:
             self.fetch_matrix[dest_row][dest_col] = fetch_matrix_np[src_row][src_col]
 
         # Once the fetch matrices are set, populate the data structure for fast lookups and servicing
+        # 作用是根据Line id判断数据是否hit
         self.prepare_hashed_buffer()
 
     #
     def prepare_hashed_buffer(self):
+        # total_size_elems buffer能够装多少个字(word 1byte)
+        # 一共100个line, 每个line的大小是elems_per_set
         elems_per_set = math.ceil(self.total_size_elems / 100)
+        print('elems_per_set=%d',elems_per_set)
 
         prefetch_rows = self.fetch_matrix.shape[0]
         prefetch_cols = self.fetch_matrix.shape[1]
@@ -151,7 +155,7 @@ class read_buffer:
                 if not elem == -1:
                     current_line.add(elem)
                     elem_ctr += 1
-
+                #line满了就加入hashed_buffer
                 if not elem_ctr < elems_per_set:    # ie > or =
                     self.hashed_buffer[line_id] = current_line
                     line_id += 1
@@ -254,7 +258,8 @@ class read_buffer:
 
         # 1. Preparing the requests:
         num_lines = math.ceil(self.active_buf_size / self.req_gen_bandwidth)
-        if not num_lines < self.fetch_matrix.shape[0]:
+        # fetch_matrix.shape是根据fetch数据的总数算出来的
+        if not num_lines < self.fetch_matrix.shape[0]: #if num_lines >= shape[0]
             num_lines = self.fetch_matrix.shape[0]
 
         requested_data_size = num_lines * self.req_gen_bandwidth

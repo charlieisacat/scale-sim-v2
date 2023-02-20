@@ -2,8 +2,8 @@ import math
 import numpy as np
 from tqdm import tqdm
 
-from scalesim.topology_utils import topologies as topoutil
-from scalesim.scale_config import scale_config as cfg
+from topology_utils import topologies as topoutil
+from scale_config import scale_config as cfg
 
 
 # This class defines data types for operand matrices
@@ -30,9 +30,9 @@ class operand_matrix(object):
         self.matrix_offset_arr = [0, 10000000, 20000000]
 
         # Address matrices
-        self.ifmap_addr_matrix = np.ones((self.ofmap_px_per_filt, self.conv_window_size), dtype=np.int)
-        self.filter_addr_matrix = np.ones((self.conv_window_size, self.num_filters), dtype=np.int)
-        self.ofmap_addr_matrix = np.ones((self.ofmap_px_per_filt, self.num_filters), dtype=np.int)
+        self.ifmap_addr_matrix = np.ones((self.ofmap_px_per_filt, self.conv_window_size), dtype=np.int32)
+        self.filter_addr_matrix = np.ones((self.conv_window_size, self.num_filters), dtype=np.int32)
+        self.ofmap_addr_matrix = np.ones((self.ofmap_px_per_filt, self.num_filters), dtype=np.int32)
 
         # Flags
         self.params_set_flag = False

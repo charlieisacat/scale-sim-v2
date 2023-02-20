@@ -5,7 +5,7 @@ import math
 import numpy as np
 #import matplotlib.pyplot as plt
 from tqdm import tqdm
-from scalesim.memory.write_port import write_port
+from memory.write_port import write_port
 
 
 class write_buffer:
@@ -177,6 +177,7 @@ class write_buffer:
                 self.store_to_trace_mat_cache(elem)
 
                 if current_cycle < self.drain_end_cycle:
+                    # free_space = total_size_elem，就是buffer能够容纳的总元素个数
                     if not self.free_space > 0:
                         offset += max(self.drain_end_cycle - current_cycle, 0)
                         current_cycle = self.drain_end_cycle

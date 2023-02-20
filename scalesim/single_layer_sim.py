@@ -1,12 +1,12 @@
 import os
 
-from scalesim.scale_config import scale_config as cfg
-from scalesim.topology_utils import topologies as topo
-from scalesim.compute.operand_matrix import operand_matrix as opmat
-from scalesim.compute.systolic_compute_os import systolic_compute_os
-from scalesim.compute.systolic_compute_ws import systolic_compute_ws
-from scalesim.compute.systolic_compute_is import systolic_compute_is
-from scalesim.memory.double_buffered_scratchpad_mem import double_buffered_scratchpad as mem_dbsp
+from scale_config import scale_config as cfg
+from topology_utils import topologies as topo
+from compute.operand_matrix import operand_matrix as opmat
+from compute.systolic_compute_os import systolic_compute_os
+from compute.systolic_compute_ws import systolic_compute_ws
+from compute.systolic_compute_is import systolic_compute_is
+from memory.double_buffered_scratchpad_mem import double_buffered_scratchpad as mem_dbsp
 
 
 class single_layer_sim:
@@ -126,6 +126,7 @@ class single_layer_sim:
         ifmap_demand_mat, filter_demand_mat, ofmap_demand_mat = self.compute_system.get_demand_matrices()
         #print('DEBUG: Compute operations done')
         # 2. Setup the memory system and run the demands through it to find any memory bottleneck and generate traces
+        print('self.memory_system_ready_flag', self.memory_system_ready_flag)
 
         # 2.1 Setup the memory system if it was not setup externally
         if not self.memory_system_ready_flag:
