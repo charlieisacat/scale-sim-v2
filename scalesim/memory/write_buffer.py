@@ -163,7 +163,7 @@ class write_buffer:
 
         DEBUG_num_drains = 0
         DEBUG_append_to_trace_times = []
-
+        # 写的时候如果buffer满了就要等待
         for i in tqdm(range(incoming_requests_arr_np.shape[0]), disable=True):
             row = incoming_requests_arr_np[i]
             cycle = incoming_cycles_arr_np[i]
@@ -178,11 +178,12 @@ class write_buffer:
 
                 if current_cycle < self.drain_end_cycle:
                     # free_space = total_size_elem，就是buffer能够容纳的总元素个数
-                    if not self.free_space > 0:
+                    # 当free space <=0时说明buffer满了，写就只能等到drain之后
+                    if not self.free_space > 0: # self.free_space <= 0
                         offset += max(self.drain_end_cycle - current_cycle, 0)
                         current_cycle = self.drain_end_cycle
-
-                elif self.free_space < (self.total_size_elems - self.drain_buf_size):
+                # 需要drain的数据量超过了drain buffer的大小, 所以要立刻写
+                elif self.free_space < (self.total_size_elems - self.drain_buf_size): #self.free_space < active buffer size
                     self.append_to_trace_mat(force=True)
                     self.drain_end_cycle = self.empty_drain_buf(empty_start_cycle=current_cycle)
 
@@ -198,11 +199,12 @@ class write_buffer:
 
         return out_cycles_arr_np
 
-    #
+    # read buffer里的是prefetch buf, write buffer里是drain buffer
     def empty_drain_buf(self, empty_start_cycle=0):
 
         lines_to_fill_dbuf = int(math.ceil(self.drain_buf_size / self.req_gen_bandwidth))
         self.drain_buf_end_line_id = self.drain_buf_start_line_id + lines_to_fill_dbuf
+        # 写回的数据不能超过trace_matrix的行数
         self.drain_buf_end_line_id = min(self.drain_buf_end_line_id, self.trace_matrix.shape[0])
 
         requests_arr_np = self.trace_matrix[self.drain_buf_start_line_id: self.drain_buf_end_line_id, :]

@@ -284,6 +284,7 @@ class ReadBufferEstimateBw:
 
             # trace_matrix存储了response_cycle和对应的地址
             self.trace_matrix = np.concatenate((self.trace_matrix, this_prefetch_traces), axis=0)
+        print('self.trace_matrix.shape====', self.trace_matrix.shape)
 
     #
     def get_latency(self):
